@@ -33,6 +33,29 @@ async function fetchTikTokPosts(user_id) {
 }
 
 /**
+ * Fetch the TikTok profile image URL for a specific user.
+ * @param {string} user_id - The ID of the user to fetch the profile image for.
+ * @returns {Promise<string|null>} - A promise that resolves to the profile image URL or null if not found.
+ */
+async function fetchTikTokProfileImage(user_id) {
+  console.log("[FETCH] Fetching TikTok profile image for user:", user_id);
+
+  const url = `https://urlebird.com/user/@${user_id}/`;
+  const browser = await puppeteer.launch({ headless: "new" });
+  const page = await browser.newPage();
+  await page.setUserAgent(
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
+  );
+  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+
+  // Select the only <img> element on the page
+  const profileImageUrl = await page.$eval("img", img => img.src).catch(() => null);
+
+  await browser.close();
+  return profileImageUrl;
+}
+
+/**
  * Main function to orchestrate the fetching and logging of TikTok posts.
  */
 async function main() {
@@ -55,9 +78,10 @@ async function main() {
 
           // Considering the post format is like "https://www.tiktok.com/@user_id/video/1234567890123456789"
           let videoIdPart = post.substring(27, 46); // Extracting the video ID part
-          let message = `${user_id} has published a new video! https://tiktok.com/@${user_id}/video/${videoIdPart}/`;
+          let message = `https://tiktok.com/@${user_id}/video/${videoIdPart}/`;
+          let profileImageUrl = await fetchTikTokProfileImage(user_id);
 
-          sendWebhookNotification(webhook, message);
+          sendWebhookNotification(webhook, message, user_id, profileImageUrl);
 
           storedPosts.push(post);
         }
@@ -77,16 +101,33 @@ async function main() {
 }
 
 /**
- * Send a webhook notification.
- * @param {string} webhook - The webhook URL to send the notification to.
+ * Sends a notification to a Discord webhook with a formatted embed message.
+ *
+ * @async
+ * @function
+ * @param {string} webhook - The Discord webhook URL to send the notification to.
  * @param {string} message - The message content to include in the notification.
+ * @param {string} user_id - The TikTok user ID to display in the embed title.
+ * @param {string} profileImageUrl - The URL of the user's profile image to use as the embed thumbnail.
+ * @returns {Promise<void>} Resolves when the webhook notification has been sent.
  */
-async function sendWebhookNotification(webhook, message) {
+async function sendWebhookNotification(webhook, message, user_id, profileImageUrl) {
   try {
     await fetch(webhook, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: message }),
+      body: JSON.stringify({ 
+        content: message,   // fallback to content for Discord
+        embeds: [{          // using embeds for better formatting
+          title: `New TikTok Post from @${user_id}`,
+          description: message,
+          color: 0x69C9D0,  // TikTok color
+          thumbnail: {
+            url: profileImageUrl
+          },
+          timestamp: new Date().toISOString(),
+        }]
+      }),
     });
   } catch (error) {
     console.error(`[ERROR] Failed to send webhook notification:`, error);
